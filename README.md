@@ -21,11 +21,11 @@ This repository contains the implementation of CCSPM and the lip-reading model w
 
 
 ## Chinese CS Prompt Module (CCSPM)
-CCSPM was built based on the openai api. To run the demo, please follow the instructions in the [CCSPM](./CCSPM) folder.
+CCSPM was built based on the openai api. To run the demo, please follow the instructions in the [CCSPM](./CCSPM) folder. Wait for finalization
 
 
 ## Lip-reading Model with MFM
-The lip-reading model with MFM was built based on the Auto-AVSR. To run the demo, please follow the instructions in the [LipModel_MFM](./LipModel_MFM) folder.
+The lip-reading model with MFM was built based on the Auto-AVSR. To run the demo, please follow the instructions in the [LipModel_MFM](./LipModel_MFM) folder. Wait for finalization
 
 ## Citation
 
