@@ -54,5 +54,5 @@ Thanks [Auto-AVSR](https://github.com/mpc001/Visual_Speech_Recognition_for_Multi
 Contributions are welcome; feel free to create a PR or email me:
 
 ```
-https://ghuang565@connect.hkust-gz.edu.cn
+ghuang565@connect.hkust-gz.edu.cn
 ```
