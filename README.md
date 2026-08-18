@@ -1,5 +1,13 @@
 # STF-ACSR
 
+## Updates
+
+- **2026-08-18:** Reorganized the release for reproducible CSPM/MFM training
+  and evaluation, with portable configuration, regression tests, CI and a
+  real-checkpoint smoke test.
+- **2025-03-31:** Added the preprint link and citation BibTeX.
+- **2025-03-12:** Released the initial STF-ACSR implementation.
+
 Official implementation of [**Lend a Hand: Semi Training-Free Cued Speech
 Recognition via MLLM-Driven Hand Modeling for Barrier-Free
 Communication**](https://arxiv.org/abs/2503.21785).
@@ -160,4 +168,5 @@ The lip-reading backbone is based on
 
 ## Contact
 
-Guanjie Huang: `ghuang565@connect.hkust-gz.edu.cn`
+- Homepage: [Guanjie Huang](https://dennishgj.github.io/)
+- Email: `ghuang565@connect.hkust-gz.edu.cn`
