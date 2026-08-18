@@ -1,9 +1,12 @@
+from pathlib import Path
+
 import torch
 import torchaudio
 
 from CCS_metrics import compute_cer, compute_wer
 from cosine import WarmupCosineScheduler
-from datamodule.transforms import TextTransform, TextTransform_CCS
+from checkpoint_utils import extract_model_state_dict, load_checkpoint
+from datamodule.transforms import TextTransform_CCS
 
 from pytorch_lightning import LightningModule
 from espnet.nets.batch_beam_search import BatchBeamSearch
@@ -17,7 +20,7 @@ def compute_word_level_distance(seq1, seq2):
 
 
 class ModelModule_CCS_hand(LightningModule):
-    def __init__(self, cfg):
+    def __init__(self, cfg, output_results=None):
         super().__init__()
         self.save_hyperparameters(cfg)
         self.cfg = cfg
@@ -29,19 +32,19 @@ class ModelModule_CCS_hand(LightningModule):
         self.text_transform = TextTransform_CCS()
         self.token_list = self.text_transform.token_list
         self.model = E2E_hand(len(self.token_list), self.backbone_args)
+        self.output_results = (
+            bool(output_results)
+            if output_results is not None
+            else bool(getattr(cfg, "output_results", False))
+        )
 
         # -- initialise
         if self.cfg.pretrained_model_path:
-            ckpt = torch.load(self.cfg.pretrained_model_path, map_location=lambda storage, loc: storage)
-            if 'epoch=' not in self.cfg.pretrained_model_path:
-                ckpt.pop('decoder.embed.0.weight')
-                ckpt.pop('decoder.output_layer.weight')
-                ckpt.pop('decoder.output_layer.bias')
-                ckpt.pop('ctc.ctc_lo.weight')
-                ckpt.pop('ctc.ctc_lo.bias')
+            checkpoint = load_checkpoint(self.cfg.pretrained_model_path)
+            ckpt = extract_model_state_dict(checkpoint)
 
             if self.cfg.transfer_frontend:
-                tmp_ckpt = {k: v for k, v in ckpt["model_state_dict"].items() if
+                tmp_ckpt = {k: v for k, v in ckpt.items() if
                             k.startswith("trunk.") or k.startswith("frontend3D.")}
                 self.model.encoder.frontend.load_state_dict(tmp_ckpt)
             elif self.cfg.transfer_encoder:
@@ -59,9 +62,18 @@ class ModelModule_CCS_hand(LightningModule):
         scheduler = {"scheduler": scheduler, "interval": "step", "frequency": 1}
         return [optimizer], [scheduler]
 
-    def forward(self, sample):
-        self.beam_search = get_beam_search_decoder(self.model, self.token_list)
+    def forward(self, sample, hand_matrix=None):
+        self.beam_search = get_beam_search_decoder(
+            self.model,
+            self.token_list,
+            ctc_weight=float(getattr(self.cfg.decode, "ctc_weight", 0.1)),
+            beam_size=int(getattr(self.cfg.decode, "beam_size", 40)),
+        )
         enc_feat, _ = self.model.encoder(sample.unsqueeze(0).to(self.device), None)
+        if hand_matrix is not None:
+            enc_feat = self.model.fuse_hand_features(
+                enc_feat, hand_matrix.unsqueeze(0).to(self.device)
+            )
         enc_feat = enc_feat.squeeze(0)
 
         nbest_hyps = self.beam_search(enc_feat)
@@ -78,8 +90,9 @@ class ModelModule_CCS_hand(LightningModule):
 
     def test_step(self, sample, sample_idx):
         enc_feat, _ = self.model.encoder(sample["input"].unsqueeze(0).to(self.device), None)
-        hand_feat =self.model.mapping_ratio * self.model.hand_mapping(sample['hand_matrix'].unsqueeze(0).to(self.device))
-        enc_feat = enc_feat + hand_feat
+        enc_feat = self.model.fuse_hand_features(
+            enc_feat, sample["hand_matrix"].unsqueeze(0).to(self.device)
+        )
         enc_feat = enc_feat.squeeze(0)
 
         nbest_hyps = self.beam_search(enc_feat)
@@ -87,6 +100,8 @@ class ModelModule_CCS_hand(LightningModule):
         predicted_token_id = torch.tensor(list(map(int, nbest_hyps[0]["yseq"][1:])))
 
         predicted = self.text_transform.post_process(predicted_token_id).replace("<eos>", "")
+        if self.output_results:
+            self.results.append(predicted)
 
         token_id = sample["target"]
 
@@ -134,15 +149,32 @@ class ModelModule_CCS_hand(LightningModule):
         self.total_length = 0
         self.total_edit_distance = 0
         self.text_transform = TextTransform_CCS()
-        self.beam_search = get_beam_search_decoder(self.model, self.token_list)
+        self.beam_search = get_beam_search_decoder(
+            self.model,
+            self.token_list,
+            ctc_weight=float(getattr(self.cfg.decode, "ctc_weight", 0.1)),
+            beam_size=int(getattr(self.cfg.decode, "beam_size", 40)),
+        )
         self.accumulate_cer = 0
         self.accumulate_wer = 0
         self.batch_num = 0
+        if self.output_results:
+            self.results = []
 
     def on_test_epoch_end(self):
+        if self.total_length == 0 or self.batch_num == 0:
+            raise RuntimeError("The test dataloader produced no evaluable samples.")
         self.log("wer", self.total_edit_distance / self.total_length)
         self.log("CCS_cer", self.accumulate_cer / self.batch_num)
         self.log("CCS_wer", self.accumulate_wer / self.batch_num)
+        if self.output_results:
+            output_path = Path(
+                str(getattr(self.cfg, "output_path", "outputs/predictions.txt"))
+            )
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(
+                "\n".join(self.results) + "\n", encoding="utf-8"
+            )
 
 
 def get_beam_search_decoder(model, token_list, ctc_weight=0.1, beam_size=40):

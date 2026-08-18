@@ -1,23 +1,24 @@
 defaults:
   - _self_
-  - data: default
+  - data: CCS_hand
   - model: default
   - optimizer: adamw
   - trainer: train
   - decode: default
   - override hydra/hydra_logging: disabled
   - override hydra/job_logging: disabled
-hydra:  
-  output_subdir: null  
-  run:  
+hydra:
+  output_subdir: null
+  run:
     dir: .
 exp_dir: outputs
-exp_name: baseline
-gpus: 0
-slurm_job_id:
-file_path:
-ckpt_path:
+exp_name: stf_acsr
+gpu: 0
+seed: 42
+save_top_k: 3
+average_checkpoints: 3
 pretrained_model_path:
-transfer_frontend:
-transfer_encoder:
-
+transfer_frontend: false
+transfer_encoder: false
+output_results: false
+output_path: outputs/predictions.txt

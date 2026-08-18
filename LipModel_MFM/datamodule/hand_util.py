@@ -1,147 +1,288 @@
+"""Convert CSPM hand labels into the phoneme prompt matrix used by MFM."""
+
 import json
+from typing import Dict, Iterable, List, Mapping, Sequence, Tuple
 
 import numpy as np
-import torch
 
 
-hashmap = { "<blank>" : 0,
-            "<unk>":1,"b": 2, "p": 3, "m": 4, "f": 5, "d": 6, "t": 7, "n": 8, "l": 9, "g": 10, "k": 11, "h": 12, "j": 13,
-            "q": 14, "x": 15, "zh": 16, "ch": 17, "sh": 18, "r": 19, "z": 20, "c": 21, "s": 22, "y": 23, "w": 24,
-            "yu": 25, "a": 26, "o": 27, "e": 28, "i": 29, "u": 30, "v": 31, "ai": 32, "ei": 33, "ao": 34, "ou": 35, "er": 36,
-            "an": 37, "en": 38, "ang": 39, "eng": 40, "ong": 41, "-": 42}
+TOKEN_TO_ID = {
+    "<blank>": 0,
+    "<unk>": 1,
+    "b": 2,
+    "p": 3,
+    "m": 4,
+    "f": 5,
+    "d": 6,
+    "t": 7,
+    "n": 8,
+    "l": 9,
+    "g": 10,
+    "k": 11,
+    "h": 12,
+    "j": 13,
+    "q": 14,
+    "x": 15,
+    "zh": 16,
+    "ch": 17,
+    "sh": 18,
+    "r": 19,
+    "z": 20,
+    "c": 21,
+    "s": 22,
+    "y": 23,
+    "w": 24,
+    "yu": 25,
+    "a": 26,
+    "o": 27,
+    "e": 28,
+    "i": 29,
+    "u": 30,
+    "v": 31,
+    "ai": 32,
+    "ei": 33,
+    "ao": 34,
+    "ou": 35,
+    "er": 36,
+    "an": 37,
+    "en": 38,
+    "ang": 39,
+    "eng": 40,
+    "ong": 41,
+    "-": 42,
+}
 
-def label2phone(hand_position, hand_gesture):
-    if hand_position == 0:
-        vowel_options = ['an', 'e', 'o']
-    elif hand_position == 1:
-        vowel_options = ['a', 'ou', 'er', 'en']
-    elif hand_position == 2:
-        vowel_options = ['i', 'v', 'ang']
-    elif hand_position == 3:
-        vowel_options = ['ai', 'u', 'ao']
-    elif hand_position == 4:
-        vowel_options = ['eng', 'ong', 'ei']
-    else:
-        vowel_options = ['<blank>']
+# Backwards-compatible public name used by the released code.
+hashmap = TOKEN_TO_ID
 
-    if hand_gesture == 0:
-        consonant_options = ['p', 'd', 'zh']
-    elif hand_gesture == 1:
-        consonant_options = ['k', 'q', 'z']
-    elif hand_gesture == 2:
-        consonant_options = ['s', 'r', 'h']
-    elif hand_gesture == 3:
-        consonant_options = ['b', 'n', 'yu']
-    elif hand_gesture == 4:
-        consonant_options = ['m', 't', 'f']
-    elif hand_gesture == 5:
-        consonant_options = ['l', 'x', 'w']
-    elif hand_gesture == 6:
-        consonant_options = ['g', 'j', 'ch']
-    elif hand_gesture == 7:
-        consonant_options = ['y', 'c', 'sh']
-    else:
-        consonant_options = ['<blank>']
+POSITION_TO_VOWELS = {
+    0: ("an", "e", "o"),
+    1: ("a", "ou", "er", "en"),
+    2: ("i", "v", "ang"),
+    3: ("ai", "u", "ao"),
+    4: ("eng", "ong", "ei"),
+}
 
-    return vowel_options, consonant_options
+SHAPE_TO_CONSONANTS = {
+    0: ("p", "d", "zh"),
+    1: ("k", "q", "z"),
+    2: ("s", "r", "h"),
+    3: ("b", "n", "yu"),
+    4: ("m", "t", "f"),
+    5: ("l", "x", "w"),
+    6: ("g", "j", "ch"),
+    7: ("y", "c", "sh"),
+}
 
 
-def load_npy(npy_path):
-    npy_file = np.load(npy_path)
-    # print(hand_position.shape)
-    return npy_file
-
-def get_lip_frame_range(slow_groups, frame_num):
-    range_list = []
-    for i in range(len(slow_groups) - 1):
-        range_list.append([slow_groups[i][0], slow_groups[i + 1][0]])
-
-    range_list.append([slow_groups[-1][0], frame_num - 1])
-    return range_list
+def label2phone(
+    hand_position: int, hand_shape: int
+) -> Tuple[Sequence[str], Sequence[str]]:
+    """Map one Mandarin CS position/shape pair to candidate phonemes."""
+    if hand_position not in POSITION_TO_VOWELS:
+        raise ValueError(f"hand_position must be in [0, 4], got {hand_position}.")
+    if hand_shape not in SHAPE_TO_CONSONANTS:
+        raise ValueError(f"hand_shape must be in [0, 7], got {hand_shape}.")
+    return POSITION_TO_VOWELS[hand_position], SHAPE_TO_CONSONANTS[hand_shape]
 
 
-def group_elements2(lst):
-    if not lst:
+def load_npy(npy_path: str) -> np.ndarray:
+    positions = np.load(npy_path)
+    if positions.ndim != 2 or positions.shape[1] != 2:
+        raise ValueError(
+            "Hand positions must have shape [frames, 2], "
+            f"received {positions.shape}."
+        )
+    return positions
+
+
+def group_elements2(
+    indices: Iterable[int], index_distance_threshold: int = 2
+) -> List[List[int]]:
+    ordered = [int(index) for index in indices]
+    if not ordered:
         return []
+    if any(right <= left for left, right in zip(ordered, ordered[1:])):
+        raise ValueError("Slow-motion indices must be strictly increasing.")
 
-    result = []
-    current_group = [lst[0]]
-
-    for i in range(1, len(lst)):
-        if lst[i] - lst[i - 1] < 2:
-            current_group.append(lst[i])
+    groups = [[ordered[0]]]
+    for index in ordered[1:]:
+        if index - groups[-1][-1] <= index_distance_threshold:
+            groups[-1].append(index)
         else:
-            result.append(current_group[:])
-            # result.append(current_group)
-            current_group = [lst[i]]
-
-    if current_group not in result:
-        result.append(current_group[:])
-    return result
+            groups.append([index])
+    return groups
 
 
-def screen_slow_motion_group(hand_position):
-    slow_index = []
-    for i in range(1, len(hand_position)):
-        # print(type(hand_position[i]))
-        if np.linalg.norm(hand_position[i] - hand_position[i - 1]) <= 6:
-            slow_index.append(i)
-    lip_keyframes_list = group_elements2(slow_index)
-    return lip_keyframes_list
+def screen_slow_motion_group(
+    hand_positions: np.ndarray,
+    speed_threshold: float = 6.0,
+    index_distance_threshold: int = 2,
+) -> List[List[int]]:
+    positions = np.asarray(hand_positions)
+    if positions.ndim != 2 or positions.shape[1] != 2:
+        raise ValueError(
+            "Hand positions must have shape [frames, 2], "
+            f"received {positions.shape}."
+        )
+    if len(positions) < 2:
+        return []
+    motion = np.linalg.norm(np.diff(positions, axis=0), axis=1)
+    slow_indices = np.flatnonzero(motion <= speed_threshold) + 1
+    return group_elements2(slow_indices, index_distance_threshold)
 
 
-
-def get_keyframe_groups(position_path):
-    hand_position = load_npy(position_path)
-    # print(len(hand_position))
-    slow_frame_groups = screen_slow_motion_group(hand_position)
-    return slow_frame_groups
-
-
-def load_hand_recog(hand_recog_path, hand_position_path, frame_num):
-    hand_matrix = torch.zeros(frame_num, 44)
+def get_keyframe_groups(
+    position_path: str,
+    speed_threshold: float = 6.0,
+    index_distance_threshold: int = 2,
+) -> List[List[int]]:
+    return screen_slow_motion_group(
+        load_npy(position_path), speed_threshold, index_distance_threshold
+    )
 
 
-    with open(hand_recog_path, 'r') as f:
-        hand_data = json.load(f)
-    f.close()
-    key_frames = hand_data['frame_index']
-    hand_results = hand_data['recog_results']
+def select_compatible_groups(
+    hand_positions: np.ndarray,
+    expected_count: int,
+    speed_threshold: float = 6.0,
+    index_distance_threshold: int = 2,
+) -> List[List[int]]:
+    """Select paper grouping, with a fallback for released legacy JSON.
 
-
-    slow_groups = get_keyframe_groups(hand_position_path)
+    Early generated recognition files grouped only strictly consecutive slow
+    frames (theta=1), while Algorithm 1 and newly generated files use theta=2.
+    The result count makes the intended convention unambiguous.
     """
-    range_list = get_lip_frame_range(slow_groups, frame_num)
-    
-    for i in range(len(key_frames)):
-        hand_position = hand_results[i]['hand_position']
-        hand_gesture = hand_results[i]['hand_gesture']
-        vowel_options, consonant_options = label2phone(hand_position, hand_gesture)
-        for vowel in vowel_options:
-            vowel_index = hashmap[vowel]
-            for j in range(range_list[i][0], range_list[i][1]):
-                hand_matrix[j][vowel_index] = 1
-
-        for consonant in consonant_options:
-            consonant_index = hashmap[consonant]
-            for j in range(range_list[i][0], range_list[i][1]):
-                hand_matrix[j][consonant_index] = 1
-    """
-    for i in range(len(key_frames)):
-        hand_position = hand_results[i]['hand_position']
-        hand_gesture = hand_results[i]['hand_gesture']
-        vowel_options, consonant_options = label2phone(hand_position, hand_gesture)
-
-        for vowel in vowel_options:
-            vowel_index = hashmap[vowel]
-            for j in range(slow_groups[i][0], slow_groups[i][-1]+1):
-                hand_matrix[j][vowel_index] = 1
-
-        for consonant in consonant_options:
-            consonant_index = hashmap[consonant]
-            for j in range(slow_groups[i][0], slow_groups[i][-1]+1):
-                hand_matrix[j][consonant_index] = 1
-
-    return hand_matrix
+    candidates = []
+    for threshold in (index_distance_threshold, 1, 2):
+        if threshold in candidates:
+            continue
+        candidates.append(threshold)
+        groups = screen_slow_motion_group(
+            hand_positions, speed_threshold, threshold
+        )
+        if len(groups) == expected_count:
+            return groups
+    counts = {
+        threshold: len(
+            screen_slow_motion_group(
+                hand_positions, speed_threshold, threshold
+            )
+        )
+        for threshold in candidates
+    }
+    raise ValueError(
+        "CSPM result count does not match any supported keyframe grouping: "
+        f"results={expected_count}, group_counts={counts}."
+    )
 
 
+def _shape_label(result: Mapping[str, object]) -> int:
+    if "hand_shape" in result:
+        return int(result["hand_shape"])
+    if "hand_gesture" in result:
+        return int(result["hand_gesture"])
+    raise KeyError("Each CSPM result must contain hand_shape or hand_gesture.")
+
+
+def _ordered_results(
+    hand_results: Sequence[Mapping[str, object]], keyframes: Sequence[int]
+) -> List[Mapping[str, object]]:
+    if len(hand_results) != len(keyframes):
+        raise ValueError(
+            "CSPM result count does not match keyframe count: "
+            f"{len(hand_results)} != {len(keyframes)}."
+        )
+
+    ids = [result.get("frame_id") for result in hand_results]
+    if all(frame_id is not None for frame_id in ids):
+        integer_ids = [int(frame_id) for frame_id in ids]
+        if len(set(integer_ids)) != len(integer_ids):
+            raise ValueError("CSPM result frame_id values must be unique.")
+        if set(integer_ids) == set(int(index) for index in keyframes):
+            by_id = {
+                int(result["frame_id"]): result
+                for result in hand_results
+            }
+            return [by_id[int(index)] for index in keyframes]
+    return list(hand_results)
+
+
+def build_hand_prompt_array(
+    hand_results: Sequence[Mapping[str, object]],
+    slow_groups: Sequence[Sequence[int]],
+    frame_num: int,
+    *,
+    keyframes: Sequence[int] = (),
+    vocabulary_size: int = 44,
+) -> np.ndarray:
+    """Build H' in R^(T x Z) from CSPM recognition and slow-motion groups."""
+    if frame_num < 0:
+        raise ValueError("frame_num must be non-negative.")
+    if vocabulary_size <= max(TOKEN_TO_ID.values()):
+        raise ValueError("vocabulary_size is too small for the Mandarin token map.")
+    if len(hand_results) != len(slow_groups):
+        raise ValueError(
+            "CSPM result count does not match slow-motion group count: "
+            f"{len(hand_results)} != {len(slow_groups)}."
+        )
+
+    resolved_keyframes = (
+        [int(index) for index in keyframes]
+        if keyframes
+        else [int(group[(len(group) - 1) // 2]) for group in slow_groups]
+    )
+    ordered = _ordered_results(hand_results, resolved_keyframes)
+    matrix = np.zeros((frame_num, vocabulary_size), dtype=np.float32)
+
+    for result, group in zip(ordered, slow_groups):
+        if not group:
+            raise ValueError("Slow-motion groups must not be empty.")
+        start, end = int(group[0]), int(group[-1])
+        if start < 0 or end >= frame_num:
+            raise ValueError(
+                f"Slow-motion group [{start}, {end}] exceeds {frame_num} frames."
+            )
+        hand_position = int(result["hand_position"])
+        hand_shape = _shape_label(result)
+        vowels, consonants = label2phone(hand_position, hand_shape)
+        token_ids = [TOKEN_TO_ID[token] for token in (*vowels, *consonants)]
+        matrix[start : end + 1, token_ids] = 1.0
+    return matrix
+
+
+def load_hand_recog(
+    hand_recog_path: str,
+    hand_position_path: str,
+    frame_num: int,
+    *,
+    speed_threshold: float = 6.0,
+    index_distance_threshold: int = 2,
+):
+    """Load CSPM JSON and return the torch hand-prompt matrix."""
+    import torch
+
+    with open(hand_recog_path, "r", encoding="utf-8") as stream:
+        hand_data: Dict[str, object] = json.load(stream)
+    hand_results = hand_data.get("recog_results")
+    if not isinstance(hand_results, list):
+        raise ValueError("CSPM JSON must contain a recog_results list.")
+
+    keyframes = hand_data.get("frame_index", [])
+    if not isinstance(keyframes, list):
+        raise ValueError("CSPM frame_index must be a list.")
+    positions = load_npy(hand_position_path)
+    slow_groups = select_compatible_groups(
+        positions,
+        len(hand_results),
+        speed_threshold,
+        index_distance_threshold,
+    )
+    array = build_hand_prompt_array(
+        hand_results,
+        slow_groups,
+        frame_num,
+        keyframes=keyframes,
+    )
+    return torch.from_numpy(array)

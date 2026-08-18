@@ -1,8 +1,6 @@
 import base64
 import os
 
-import openai
-
 shape0 = f""" 
    I will now provide several hand-zoom images with corresponding labels as the shape support set to help you have a sufficient reference when making predictions on test images. 
    There are eight types of hand shapes. Five images for hand at different locations with descriptions are provided for each category. Please ignore the hand's color and position and focus only on the hand shape.
@@ -129,25 +127,24 @@ def build_shape_support_set(hand_folder_path,set_size=5):
         hand_zoom_img_5 = encode_image(hand_path_5)
 
 
-        """
-        sample_text = {
-            "type": "text",
-            "text": label_list[i],
-        }
-        sample_image = {
-            "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{current_img}"},
-            "detail": "low"
-        }
-        """
-
-        content_list.append(label_list[i * 2])
-        content_list.append({"image": hand_zoom_img, "resize": 512})
-        content_list.append({"image": hand_zoom_img_2, "resize": 512})
-        content_list.append({"image": hand_zoom_img_3, "resize": 512})
-        content_list.append({"image": hand_zoom_img_4, "resize": 512})
-        content_list.append({"image": hand_zoom_img_5, "resize": 512})
-        content_list.append(label_list[i * 2 + 1])
+        content_list.append({"type": "text", "text": label_list[i * 2]})
+        for encoded in (
+            hand_zoom_img,
+            hand_zoom_img_2,
+            hand_zoom_img_3,
+            hand_zoom_img_4,
+            hand_zoom_img_5,
+        ):
+            content_list.append(
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{encoded}",
+                        "detail": "high",
+                    },
+                }
+            )
+        content_list.append({"type": "text", "text": label_list[i * 2 + 1]})
     return content_list
 
 
