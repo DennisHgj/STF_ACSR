@@ -92,10 +92,7 @@ class E2E_hand(torch.nn.Module):
         padding_mask = make_non_pad_mask(lengths).to(x.device).unsqueeze(-2)
 
         x, _ = self.encoder(x, padding_mask)
-        # ctc loss
-        hand_matrix.to(x.device)
-
-        x = x + self.mapping_ratio * self.hand_mapping(hand_matrix)
+        x = self.fuse_hand_features(x, hand_matrix)
 
         loss_ctc, ys_hat = self.ctc(x, lengths, label)
 
@@ -114,3 +111,32 @@ class E2E_hand(torch.nn.Module):
         )
 
         return loss, loss_ctc, loss_att, acc
+
+    def fuse_hand_features(self, lip_features, hand_matrix):
+        """Apply P = L' + lambda f(H') from Equation (3)."""
+        if hand_matrix is None:
+            return lip_features
+        if hand_matrix.dim() == 2:
+            hand_matrix = hand_matrix.unsqueeze(0)
+        if hand_matrix.dim() != 3:
+            raise ValueError(
+                "hand_matrix must have shape [batch, frames, vocabulary]."
+            )
+        if hand_matrix.shape[:2] != lip_features.shape[:2]:
+            raise ValueError(
+                "Lip and hand features must share batch/time dimensions: "
+                f"{tuple(lip_features.shape[:2])} != "
+                f"{tuple(hand_matrix.shape[:2])}."
+            )
+        if hand_matrix.size(-1) != self.odim:
+            raise ValueError(
+                f"Expected hand vocabulary size {self.odim}, "
+                f"received {hand_matrix.size(-1)}."
+            )
+        hand_matrix = hand_matrix.to(
+            device=lip_features.device, dtype=lip_features.dtype
+        )
+        return (
+            lip_features
+            + self.mapping_ratio * self.hand_mapping(hand_matrix)
+        )

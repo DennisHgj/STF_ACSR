@@ -1,2 +1,4 @@
 name: default
 snr_target: 999999
+beam_size: 40
+ctc_weight: 0.1

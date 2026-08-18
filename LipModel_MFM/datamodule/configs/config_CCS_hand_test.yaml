@@ -7,18 +7,18 @@ defaults:
   - decode: default
   - override hydra/hydra_logging: disabled
   - override hydra/job_logging: disabled
-hydra:  
-  output_subdir: null  
-  run:  
+hydra:
+  output_subdir: null
+  run:
     dir: .
-exp_dir: /data/guanjie/CuedSpeech/exp
-exp_name: lip_hand_6H_multi_0128
-gpus: 1
-slurm_job_id:
-file_path:
-ckpt_path: epoch=5-loss_val=8.358474731445312.ckpt
+exp_dir: checkpoints
+exp_name: stf_acsr
+ckpt_path:
+gpu: 0
+seed: 42
+limit_test_batches: 1
 pretrained_model_path:
-transfer_frontend:
-transfer_encoder:
-num-nodes: 1
-
+transfer_frontend: false
+transfer_encoder: false
+output_results: false
+output_path: outputs/predictions.txt

@@ -51,13 +51,28 @@ class DataModule_CCS(LightningDataModule):
     def __init__(self, cfg=None):
         super().__init__()
         self.cfg = cfg
-        self.cfg.gpus = torch.cuda.device_count()
-        self.total_gpus = self.cfg.gpus * self.cfg.trainer.num_nodes
+        available_gpus = torch.cuda.device_count()
+        self.total_gpus = available_gpus * self.cfg.trainer.num_nodes
+
+    def _transforms(self, subset):
+        modality = self.cfg.data.modality
+        audio_transform = None
+        video_transform = None
+
+        if modality in {"audio", "audiovisual"}:
+            snr_target = self.cfg.decode.snr_target if subset == "test" else None
+            audio_transform = AudioTransform(subset, snr_target=snr_target)
+        if modality in {"video", "audiovisual"}:
+            video_transform = VideoTransform(subset)
+
+        if audio_transform is None and video_transform is None:
+            raise ValueError(f"Unsupported modality: {modality!r}")
+        return audio_transform, video_transform
 
     def _dataloader(self, ds, sampler, collate_fn):
         return torch.utils.data.DataLoader(
             ds,
-            num_workers=12,
+            num_workers=int(getattr(self.cfg.data, "num_workers", 4)),
             pin_memory=True,
             batch_sampler=sampler,
             collate_fn=collate_fn,
@@ -65,6 +80,7 @@ class DataModule_CCS(LightningDataModule):
 
     def train_dataloader(self):
         ds_args = self.cfg.data.dataset
+        audio_transform, video_transform = self._transforms("train")
         train_ds = AVDataset_CCS(
             root_dir=ds_args.root_dir,
             label_path=os.path.join(
@@ -72,8 +88,8 @@ class DataModule_CCS(LightningDataModule):
             ),
             subset="train",
             modality=self.cfg.data.modality,
-            audio_transform=AudioTransform("train"),
-            video_transform=VideoTransform("train"),
+            audio_transform=audio_transform,
+            video_transform=video_transform,
         )
         sampler = ByFrameCountSampler(train_ds, self.cfg.data.max_frames)
         if self.total_gpus > 1:
@@ -84,13 +100,14 @@ class DataModule_CCS(LightningDataModule):
 
     def val_dataloader(self):
         ds_args = self.cfg.data.dataset
+        audio_transform, video_transform = self._transforms("val")
         val_ds = AVDataset_CCS(
             root_dir=ds_args.root_dir,
             label_path=os.path.join(ds_args.root_dir, ds_args.label_dir, ds_args.val_file),
             subset="val",
             modality=self.cfg.data.modality,
-            audio_transform=AudioTransform("val"),
-            video_transform=VideoTransform("val"),
+            audio_transform=audio_transform,
+            video_transform=video_transform,
         )
         sampler = ByFrameCountSampler(
             val_ds, self.cfg.data.max_frames_val, shuffle=False
@@ -101,15 +118,14 @@ class DataModule_CCS(LightningDataModule):
 
     def test_dataloader(self):
         ds_args = self.cfg.data.dataset
+        audio_transform, video_transform = self._transforms("test")
         dataset = AVDataset_CCS(
             root_dir=ds_args.root_dir,
             label_path=os.path.join(ds_args.root_dir, ds_args.label_dir, ds_args.test_file),
             subset="test",
             modality=self.cfg.data.modality,
-            audio_transform=AudioTransform(
-                "test", snr_target=self.cfg.decode.snr_target
-            ),
-            video_transform=VideoTransform("test"),
+            audio_transform=audio_transform,
+            video_transform=video_transform,
         )
         dataloader = torch.utils.data.DataLoader(dataset, batch_size=None)
         return dataloader

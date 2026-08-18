@@ -1,4 +1,5 @@
 import os
+from glob import glob
 import torch
 
 
@@ -24,16 +25,19 @@ def average_checkpoints(last):
     return avg
 
 
-def ensemble(args):
-    last = [
-        os.path.join(args.exp_dir, args.exp_name, f"epoch={n}.ckpt")
-        for n in range(
-            args.trainer.max_epochs - 10,
-            args.trainer.max_epochs,
+def ensemble(args, count=3):
+    experiment_dir = os.path.join(args.exp_dir, args.exp_name)
+    candidates = sorted(
+        glob(os.path.join(experiment_dir, "epoch=*.ckpt")),
+        key=os.path.getmtime,
+    )
+    last = candidates[-int(count):]
+    if not last:
+        raise FileNotFoundError(
+            f"No epoch checkpoints were found in {experiment_dir}."
         )
-    ]
     model_path = os.path.join(
-        args.exp_dir, args.exp_name, f"model_avg_10.pth"
+        experiment_dir, f"model_avg_{len(last)}.pth"
     )
     torch.save(average_checkpoints(last), model_path)
     return model_path

@@ -1,10 +1,11 @@
+import csv
 import os
 
 import torch
 import torchaudio
 import torchvision
 
-from LipModel_MFM.datamodule.hand_util import load_hand_recog
+from .hand_util import load_hand_recog
 
 
 def cut_or_pad(data, size, dim=0):
@@ -62,32 +63,60 @@ class AVDataset_CCS(torch.utils.data.Dataset):
 
     def load_list(self, label_path):
         paths_counts_labels = []
-        for path_count_label in open(label_path).read().splitlines():
-            dataset_name, rel_path, input_length, token_id, hand_recog_path, hand_position_path = path_count_label.split(
-                ",")
-            paths_counts_labels.append(
+        with open(label_path, newline="", encoding="utf-8-sig") as stream:
+            for line_number, row in enumerate(csv.reader(stream), start=1):
+                if not row or (row[0].lstrip().startswith("#")):
+                    continue
+                if len(row) != 6:
+                    raise ValueError(
+                        f"{label_path}:{line_number} must contain 6 fields, "
+                        f"received {len(row)}."
+                    )
                 (
                     dataset_name,
                     rel_path,
-                    int(input_length),
-                    torch.tensor([int(_) for _ in token_id.split()]),
+                    input_length,
+                    token_id,
                     hand_recog_path,
-                    hand_position_path
+                    hand_position_path,
+                ) = row
+                paths_counts_labels.append(
+                    (
+                        dataset_name,
+                        rel_path,
+                        int(input_length),
+                        torch.tensor([int(value) for value in token_id.split()]),
+                        hand_recog_path,
+                        hand_position_path,
+                    )
                 )
-            )
         return paths_counts_labels
+
+    def _resolve_path(self, path):
+        return path if os.path.isabs(path) else os.path.join(self.root_dir, path)
 
     def __getitem__(self, idx):
         dataset_name, rel_path, input_length, token_id, hand_recog_path, hand_position_path = self.list[idx]
         path = os.path.join(self.root_dir, dataset_name, rel_path)
         if os.path.exists(path) is False:
             raise FileNotFoundError(f"{path} does not exist.")
-        if os.path.exists(hand_recog_path) is False:
-            raise FileNotFoundError(f"{hand_recog_path} does not exist.")
+        hand_recog_path = self._resolve_path(hand_recog_path)
+        hand_position_path = self._resolve_path(hand_position_path)
         if self.modality == "video":
+            if not os.path.exists(hand_recog_path):
+                raise FileNotFoundError(f"{hand_recog_path} does not exist.")
+            if not os.path.exists(hand_position_path):
+                raise FileNotFoundError(f"{hand_position_path} does not exist.")
             video = load_video(path)
             video = self.video_transform(video)
-            hand_recog_matrix = load_hand_recog(hand_recog_path, hand_position_path, input_length)
+            if input_length != len(video):
+                raise ValueError(
+                    f"Label length {input_length} does not match decoded video "
+                    f"length {len(video)} for {path}."
+                )
+            hand_recog_matrix = load_hand_recog(
+                hand_recog_path, hand_position_path, len(video)
+            )
             return {"input": video, "target": token_id, "hand_matrix": hand_recog_matrix}
         elif self.modality == "audio":
             audio = load_audio(path)

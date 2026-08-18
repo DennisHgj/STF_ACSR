@@ -1,8 +1,6 @@
 import base64
 import os
 
-import openai
-
 position1 = f""" 
 I will now provide several hand-zoom images with corresponding position labels as the position support set to help you have a sufficient reference when making predictions on test images. 
 There are five possible position of hand in cued speech. In this support set, each hand position category contains 8 pictures, which cover all eight possible hand shapes that appear in the same position label. 
@@ -88,28 +86,27 @@ def build_position_support_set(hand_folder_path, set_size=5):
         hand_zoom_img_8 = encode_image(hand_path_8)
 
 
-        """
-        sample_text = {
-            "type": "text",
-            "text": label_list[i],
-        }
-        sample_image = {
-            "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{current_img}"},
-            "detail": "low"
-        }
-        """
-
-        content_list.append(label_list[i * 2])
-        content_list.append({"image": hand_zoom_img, "resize": 512})
-        content_list.append({"image": hand_zoom_img_2, "resize": 512})
-        content_list.append({"image": hand_zoom_img_3, "resize": 512})
-        content_list.append({"image": hand_zoom_img_4, "resize": 512})
-        content_list.append({"image": hand_zoom_img_5, "resize": 512})
-        content_list.append({"image": hand_zoom_img_6, "resize": 512})
-        content_list.append({"image": hand_zoom_img_7, "resize": 512})
-        content_list.append({"image": hand_zoom_img_8, "resize": 512})
-        content_list.append(label_list[i * 2 + 1])
+        content_list.append({"type": "text", "text": label_list[i * 2]})
+        for encoded in (
+            hand_zoom_img,
+            hand_zoom_img_2,
+            hand_zoom_img_3,
+            hand_zoom_img_4,
+            hand_zoom_img_5,
+            hand_zoom_img_6,
+            hand_zoom_img_7,
+            hand_zoom_img_8,
+        ):
+            content_list.append(
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{encoded}",
+                        "detail": "high",
+                    },
+                }
+            )
+        content_list.append({"type": "text", "text": label_list[i * 2 + 1]})
     return content_list
 
 
